@@ -1,0 +1,284 @@
+---
+title: "Project 3"
+author: "Kassandra Sellers and Clark Necciai"
+date: "2024-06-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Exploratory Analysis 
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(visdat)
+library(arules)
+library(recommenderlab)
+```
+
+```{r}
+#reading in the data
+books = read.csv("Books.csv")
+ratings = read.csv("Ratings.csv")
+```
+
+```{r}
+#getting a glimpse of the data
+books %>% glimpse()
+ratings %>% glimpse()
+```
+
+
+Data Preprocessing
+
+```{r}
+#Not sure if this is needed but dropping URLS 
+books = subset(books, select = -c(image_url, small_image_url) )
+```
+
+```{r}
+#Find and Remove Dupilcates from books dataset 
+books = books %>% distinct(title, .keep_all = TRUE)
+
+#Find and Remove Dupilcates from reviews dataset
+ratings = ratings %>% distinct(book_id, user_id, .keep_all = TRUE)
+```
+
+```{r}
+#Only keep ratings from users with 100 or more reviews
+
+```
+
+
+```{r}
+#Create utility matrix
+utilitymat = spread(select(ratings, user_id, book_id, rating), book_id, rating)
+utilitymat = as.matrix(utilitymat[,-1])
+```
+
+```{r}
+user_labels = sort(unique(ratings$userId))
+book_labels = books[match(as.numeric(colnames(utilitymat)),books$book_id),]$title
+dimension_names = list(userId = user_labels, books = book_labels)
+dimnames(utilitymat) = dimension_names
+
+utilitymat[1:4,1:4] 
+```
+
+
+```{r}
+
+#Converting rating/utility matrix to realRatingMatrix to use with recommenderlab functions
+ratingMatrix = as(utilitymat, "realRatingMatrix")
+
+
+#Inspection of rating matrix: 
+#Visual inspection of a small portion of the rating matrix (first 50 users, first 100 books)
+image(ratingMatrix[1:50,1:100], main = "Raw Ratings")
+
+#Number of submitted reviews (for each of the first 10 users)
+rowCounts(ratingMatrix[1:10,])
+
+#Number of users who have submitted at least 25 reviews
+length(rowCounts(ratingMatrix)>=25)
+
+#Average rating submitted (for each of the first 10 users)
+rowMeans(ratingMatrix[1:10,]) #automatically ignores NA's
+```
+
+User-based collaborative filtering
+
+```{r}
+recUB = Recommender(ratingMatrix[-1,],"UBCF",
+                    param = list(method="cosine",nn = 10))
+```
+
+```{r}
+#recommendations for the first user (top 5)
+predUBTOP = predict(recUB,ratingMatrix[1,],n=5)
+as(predUBTOP,'list')
+```
+
+```{r}
+#recommendations for the first user (predicted ratings of the movies not rated by the user)
+predUB = predict(recUB,ratingMatrix[1,],type="ratings")
+as(predUB,'list')
+```
+
+```{r}
+#Optional: storing predicted ratings in a data frame
+predictedUB_ratings = as(predUB,'data.frame') 
+```
+
+Item-based collaborative filtering
+
+```{r}
+########### Item-based collaborative filtering model (IBCF):
+#k: number of nearest items considered in making the recommendations
+#method: the similarity measure, 'cosine' or 'pearson'
+#(excluding the first user from training)
+recIB = Recommender(ratingMatrix[-1,],"IBCF",
+                    param = list(method="pearson",k=10))
+```
+
+```{r}
+#recommendations for the first user (top 5)
+predIBTOP = predict(recIB,ratingMatrix[1,],n=5)
+as(predIBTOP,'list')
+```
+
+```{r}
+#recommendations for the first user (predicted ratings of the movies not rated by the user)
+predIB = predict(recIB,ratingMatrix[1,],type="ratings")
+as(predIB,'list')
+```
+
+```{r}
+#Optional: storing predicted ratings in a data frame
+predictedIB_ratings = as(predIB,'data.frame') 
+```
+
+Comparing the models
+
+```{r}
+#Example 1:
+#Here we're doing 5-fold CV, one rating is kept as holdout, and a good rating is 4 stars or more
+set.seed(123)
+scheme1 = evaluationScheme(ratingMatrix, method = "cross-validation",
+                           k=5, given=-1)
+```
+
+```{r}
+#We can evaluate a single or multiple models based on the defined scheme
+#If "ratings" type is used, evaluations are in terms of RMSE (difference between actual and predicted rating)
+results1 = evaluate(x=scheme1, method="UBCF", type="ratings")
+avg(results1)
+```
+
+```{r}
+#Example 2:
+#Here we are splitting the data into train/test (90/10), providing 15 ratings, 
+# and defining good rating (i.e. a liked item) as 3 stars or more
+set.seed(123)
+scheme2 = evaluationScheme(ratingMatrix, method = "split",
+                           train=0.9, given=15, goodRating=3)
+```
+
+```{r}
+#If type is not specified,the default "topNList" is used and evaluations are based on confusion matrix
+#Using n, we are evaluating models for different values of n (number of recommendations)
+results2 = evaluate(x=scheme2, method="UBCF", n = seq(10, 100, 10))
+results2@results[[1]]
+plot(results2, annotate=T, main="ROC Curve")
+```
+
+```{r}
+############ Comparing multiple models at the same time
+
+#Example 3:
+#Defining good rating (i.e. a liked item) as 4 stars or more
+set.seed(123)
+scheme3 = evaluationScheme(ratingMatrix, method = "split",
+                           train=0.9, given=15, goodRating=4)
+
+#Setting up a list of models to compare
+algorithms = list("random" = list(name = "RANDOM", param = NULL),
+                  "UBCF_10" =   list(name = "UBCF", param = list(nn = 10)),
+                  "UBCF_10_P" = list(name = "UBCF", param = list(nn = 10, method="pearson")),
+                  "UBCF_25" = list(name = "UBCF", param = list(nn = 25)),
+                  "IBCF_25" = list(name = "IBCF", param = list(k = 25)),
+                  "IBCF_50_P" = list(name = "IBCF", param = list(k = 150, method="pearson")))
+
+#Evaluating models in terms of their predicted ratings:
+resultsRMSE = evaluate(x=scheme3, method=algorithms, type="ratings")
+avg(resultsRMSE)
+plot(resultsRMSE)
+
+
+#Evaluating models in terms of their top_N recommended movies:
+resultsROC = evaluate(x=scheme3, method=algorithms, n=seq(10,100,10))
+
+#ROC plot
+plot(resultsROC, annotate = T, legend = "topleft", main="ROC Curve")
+
+#Precision/Recall plot
+plot(resultsROC, "prec/rec", annotate = T, legend = "bottomright", main="Precision/Recall")
+```
+
+Five book recommendations to the first user in the utility matrix
+```{r}
+#Choose the best model and use those to make recommendation
+```
+
+Association rules analysis
+
+```{r}
+#Load the data
+books.df = read.csv("Books.csv")
+ratings.df = read.csv("Ratings.csv")
+
+
+#remove duplicates from books dataset
+books.df = books.df %>% distinct(title, .keep_all = TRUE)
+
+#Find and Remove Dupilcates from reviews dataset
+ratings.df = ratings.df %>% distinct(book_id, user_id, .keep_all = TRUE)
+
+#Only keep users with 100 or more ratings
+
+
+#Dropping all columns except Book ID and Title
+books.df <- books.df %>% select(book_id, title)
+
+#formatting the ratings dataset
+ratings.df <- ratings.df %>% spread(key = book_id, value = rating)
+
+#Remove first column (user IDs) and convert to matrix
+ratings.mat = as.matrix(ratings.df[, -1])
+```
+
+```{r}
+#Convert the binary incidence matrix into a transactions database
+ratings.trans = as(ratings.mat, "transactions")
+```
+
+```{r}
+#Inspect all existing itemsets
+inspect(ratings.trans)
+```
+
+```{r}
+#Plots the item frequencies (only colors with > % support or top 5)
+itemFrequencyPlot(ratings.trans,support=.08)
+itemFrequencyPlot(ratings.trans,topN=5)
+```
+
+```{r}
+#Get rules: when running apriori(), include the minimum support, minimum confidence
+rules = apriori(ratings.trans, parameter = list(supp = 0.2, conf = 0.5))
+```
+
+```{r}
+#Inspect the generated rules
+inspect(rules)
+```
+
+```{r}
+#Let's filter by lift > 1 
+#(among the rules with support>0.2 and confidence>0.5, only show the ones with lift>1)
+inspect(subset(rules, lift>1)) 
+```
+
+```{r}
+## Order by confidence to make it easier to understand
+inspect(sort(rules, by="confidence")) 
+```
+
+```{r}
+## Filter by rhs to show only the rules that have White as their consequent (right hand side)
+inspect(subset(rules, rhs %in% "White"))
+```
+
