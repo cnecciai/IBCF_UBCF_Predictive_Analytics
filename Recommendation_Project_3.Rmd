@@ -1,15 +1,9 @@
 ---
-title: "Project 3"
+title: "Predictive Analytics - Project #3"
 author: "Kassandra Sellers and Clark Necciai"
 date: "2024-06-22"
 output: html_document
 ---
-
-1. Perform Data Prep (remove duplicate values)
-2. Perform EDA 
-3. Prepare Data for Modeling
-4. Show some analysis on matrix form of ratings
-5. Modeling 
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, fig.width = 6, fig.height = 3)
@@ -22,13 +16,14 @@ library(dplyr)
 library(visdat)
 library(arules)
 library(recommenderlab)
-```
+library(RColorBrewer)
 
-```{r}
 #reading in the data
 books_df = read.csv("Books.csv")
 ratings_df = read.csv("Ratings.csv")
 ```
+
+*Initial Inspection*
 
 ```{r}
 #Observe Books Data
@@ -39,8 +34,6 @@ books_df %>% glimpse()
 #Observe Ratings Data
 ratings_df %>% glimpse()
 ```
-
-## Collaborative Filtering
 
 ### Data Preprocessing
 
@@ -117,8 +110,10 @@ print(paste("Final Number of Observations (Ratings): ",dim(ratings_df)[1]))
 books_df %>% select(original_publication_year, average_rating, ratings_count, text_reviews_count,ratings_1, ratings_2, ratings_3, ratings_4, ratings_5) %>% summary()
 ```
 
+#### Data Visualization
+
 ```{r}
-#Oldest Books in Repository
+#Inspect `original_publication_year to see oldest Books
 books_df[books_df$original_publication_year < -500 & !is.na(books_df$original_publication_year),] %>% 
   arrange((original_publication_year)) %>% 
   select(title, original_publication_year, authors)
@@ -127,7 +122,10 @@ books_df[books_df$original_publication_year < -500 & !is.na(books_df$original_pu
 #### Distribution of Ratings
 
 ```{r message=FALSE, warning=FALSE}
-#As people hear about a book's popularity, they may be inclined to read and give feedback 
+#This visualization may infer that if people are hearing that a book
+#is bad, they may be less inclined to read it, as evidenced by the 
+#high density number of observations near the lower end of the number
+#of ratings for ratings_1 and ratings_2
 
 #Subset ratings for Density Plot
 vars_to_plot <- c("ratings_1", "ratings_2", "ratings_3", "ratings_4", "ratings_5")
@@ -150,6 +148,7 @@ ggplot(df_long, aes(x = value, fill = variable)) +
 #### Highest Rated Books (title) 
 
 ```{r fig.height=2}
+#See which books have the highest average ratings
 books_df %>% 
   arrange(desc(average_rating)) %>% 
   select(book_id, title, average_rating, authors) %>% 
@@ -168,6 +167,11 @@ books_df %>%
 #### Highest Rated Authors (author) 
 
 ```{r fig.height=2}
+#Inspect Which Authors on average has the highest rated books
+#We're going to be looking at authors who have written more than 
+#a few books, given that the vast majority of authors have only
+#written a single book
+
 books_df %>% group_by(authors) %>%
   summarise(count_books_written = n(),
             average_rating = mean(average_rating, na.rm = T)) %>%
@@ -259,9 +263,9 @@ mtext((paste("Median Rating of All Books: ", round(median_rating,2 ))),
 abline(v = median_rating, col = "red", lty = 2)
 ```
 
-### Modeling
+## Modeling
 
-#### User and Item based Collaborative Filtering
+### User and Item based Collaborative Filtering
 
 ```{r}
 #Defining good rating as 4 stars or more
@@ -342,9 +346,8 @@ as(pred_UBCF_10_P_vals,'list')$`0` %>%
   arrange(desc(Ratings)) %>% head(5)
 ```
 
----  
 
-## Association Rules Analysis
+### Association Rules Analysis
 
 ```{r}
 #Now the interpretation is "Has this User Read this Book?"
@@ -360,36 +363,26 @@ association_mat[association_mat != 0] <- 1
 book_trans = as(association_mat, "transactions")
 ```
 
+### Show Highest Occurrence of All Books
 
-```{r}
-#Plots the item frequencies (only colors with > % support or top 5)
-itemFrequencyPlot(book_trans,support=.08)
-itemFrequencyPlot(book_trans,topN=5)
+```{r fig.height=5, fig.width=12}
+itemFrequencyPlot(book_trans, topN=5, type="absolute", 
+                  col=brewer.pal(8, 'Pastel1'),
+                  main="Top Occurring Books", 
+                  xlab="Absolute Item Frequency",
+                  horiz=T)
 ```
+
+### Inspect Top 3 Rules 
 
 ```{r}
 #Get rules: when running apriori(), include the minimum support, minimum confidence
-rules = apriori(ratings.trans, parameter = list(supp = 0.2, conf = 0.5))
+rules = apriori(book_trans, parameter = list(supp = 0.046, conf = 1), target = "rules")
 ```
 
-```{r}
-#Inspect the generated rules
-inspect(rules)
-```
 
 ```{r}
-#Let's filter by lift > 1 
-#(among the rules with support>0.2 and confidence>0.5, only show the ones with lift>1)
-inspect(subset(rules, lift>1)) 
-```
-
-```{r}
-## Order by confidence to make it easier to understand
-inspect(sort(rules, by="confidence")) 
-```
-
-```{r}
-## Filter by rhs to show only the rules that have White as their consequent (right hand side)
-inspect(subset(rules, rhs %in% "White"))
+#List the top 3 rules sorted by lift
+assoc.rules <- inspect(head(sort(rules,by="lift"),3))
 ```
 
