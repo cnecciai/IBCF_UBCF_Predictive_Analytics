@@ -228,7 +228,7 @@ ratingmat = as.matrix(ratingmat[,-1])
 #Set Row and Column Labels to be respective User Ids and Book Titles
 user_labels = sort(unique(ratings_df$user_id))
 book_titles = books_df[match(as.numeric(colnames(ratingmat)),books_df$book_id),]$title
-dimension_names = list(userId = user_labels, movieId = book_titles)
+dimension_names = list(user_id = user_labels, book_id = book_titles)
 #Replace Book Ids with Book Titles
 dimnames(ratingmat) = dimension_names
 ratingmat[1:5,1:3]
@@ -246,7 +246,7 @@ image(ratingMatrix[1:nrow(ratingMatrix),1:ncol(ratingMatrix)], main = "Raw Ratin
 ```
 
 ```{r}
-#Number of submitted reviews - Left Skewed (Sudden Rise around 180-195)
+#Number of submitted reviews - Right Skewed (Sudden Rise around 180-195)
 count_ratings = rowCounts(ratingMatrix[1:nrow(ratingMatrix),])
 med_num_ratings = median(count_ratings, na.rm = T)
 hist(count_ratings, breaks = 15, main = "Distribution of Submitted Ratings")
