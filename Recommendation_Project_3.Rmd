@@ -40,6 +40,8 @@ books_df %>% glimpse()
 ratings_df %>% glimpse()
 ```
 
+## Collaborative Filtering
+
 ### Data Preprocessing
 
 #### Missing Values  
@@ -259,172 +261,110 @@ abline(v = median_rating, col = "red", lty = 2)
 
 ### Modeling
 
-#### User-based collaborative filtering
+#### User and Item based Collaborative Filtering
 
 ```{r}
-recUB = Recommender(ratingMatrix[-1,],"UBCF",
-                    param = list(method="cosine",nn = 10))
-```
+#Defining good rating as 4 stars or more
 
-```{r}
-#recommendations for the first user (top 5)
-predUBTOP = predict(recUB,ratingMatrix[1,],n=5)
-as(predUBTOP,'list')
-```
-
-```{r}
-#recommendations for the first user (predicted ratings of the movies not rated by the user)
-predUB = predict(recUB,ratingMatrix[1,],type="ratings")
-as(predUB,'list')
-```
-
-```{r}
-#Optional: storing predicted ratings in a data frame
-predictedUB_ratings = as(predUB,'data.frame') 
-predictedUB_ratings %>% arrange(desc(rating))
-```
-
-#### Item-based collaborative filtering
-
-```{r}
-########### Item-based collaborative filtering model (IBCF):
-#k: number of nearest items considered in making the recommendations
-#method: the similarity measure, 'cosine' or 'pearson'
-#(excluding the first user from training)
-recIB = Recommender(ratingMatrix[-1,],"IBCF",
-                    param = list(method="pearson",k=10))
-```
-
-```{r}
-#recommendations for the first user (top 5)
-predIBTOP = predict(recIB,ratingMatrix[1,],n=5)
-as(predIBTOP,'list')
-```
-
-```{r}
-#recommendations for the first user (predicted ratings of the movies not rated by the user)
-predIB = predict(recIB,ratingMatrix[1,],type="ratings")
-as(predIB,'list')
-```
-
-```{r}
-#Optional: storing predicted ratings in a data frame
-predictedIB_ratings = as(predIB,'data.frame') 
-```
-
-Comparing the models
-
-```{r}
-#Example 1:
-#Here we're doing 5-fold CV, one rating is kept as holdout, and a good rating is 4 stars or more
-set.seed(123)
-scheme1 = evaluationScheme(ratingMatrix, method = "cross-validation",
-                           k=5, given=-1)
-```
-
-```{r}
-#We can evaluate a single or multiple models based on the defined scheme
-#If "ratings" type is used, evaluations are in terms of RMSE (difference between actual and predicted rating)
-results1 = evaluate(x=scheme1, method="UBCF", type="ratings")
-avg(results1)
-```
-
-```{r}
-#Example 2:
-#Here we are splitting the data into train/test (90/10), providing 15 ratings, 
-# and defining good rating (i.e. a liked item) as 3 stars or more
-set.seed(123)
-scheme2 = evaluationScheme(ratingMatrix, method = "split",
-                           train=0.9, given=15, goodRating=3)
-```
-
-```{r}
-#If type is not specified,the default "topNList" is used and evaluations are based on confusion matrix
-#Using n, we are evaluating models for different values of n (number of recommendations)
-results2 = evaluate(x=scheme2, method="UBCF", n = seq(10, 100, 10))
-results2@results[[1]]
-plot(results2, annotate=T, main="ROC Curve")
-```
-
-```{r}
-############ Comparing multiple models at the same time
-
-#Example 3:
-#Defining good rating (i.e. a liked item) as 4 stars or more
-set.seed(123)
-scheme3 = evaluationScheme(ratingMatrix, method = "split",
-                           train=0.9, given=15, goodRating=4)
+#Given that we specified users as having at least 100 ratings, we'll allow for 75
+set.seed(42)
+scheme = evaluationScheme(ratingMatrix,method = "split",
+                           train=0.9, given=75, goodRating=4)
 
 #Setting up a list of models to compare
 algorithms = list("random" = list(name = "RANDOM", param = NULL),
+                  #User-based Collaborative Filtering Models
                   "UBCF_10" =   list(name = "UBCF", param = list(nn = 10)),
                   "UBCF_10_P" = list(name = "UBCF", param = list(nn = 10, method="pearson")),
                   "UBCF_25" = list(name = "UBCF", param = list(nn = 25)),
+                  "UBCF_25_P" = list(name = "UBCF", param = list(nn = 25, method="pearson")),
+                  #Item-Based Collaborative Filtering Models
+                  "IBCF_10" =   list(name = "IBCF", param = list(k = 10)),
+                  "IBCF_10_P" = list(name = "IBCF", param = list(k = 10, method="pearson")),                  
                   "IBCF_25" = list(name = "IBCF", param = list(k = 25)),
-                  "IBCF_50_P" = list(name = "IBCF", param = list(k = 150, method="pearson")))
-
-#Evaluating models in terms of their predicted ratings:
-resultsRMSE = evaluate(x=scheme3, method=algorithms, type="ratings")
-avg(resultsRMSE)
-plot(resultsRMSE)
-
+                  "IBCF_25_P" = list(name = "IBCF", param = list(k = 25, method="pearson")))
 
 #Evaluating models in terms of their top_N recommended movies:
-resultsROC = evaluate(x=scheme3, method=algorithms, n=seq(10,100,10))
-
-#ROC plot
-plot(resultsROC, annotate = T, legend = "topleft", main="ROC Curve")
-
-#Precision/Recall plot
-plot(resultsROC, "prec/rec", annotate = T, legend = "bottomright", main="Precision/Recall")
+resultsROC = evaluate(x=scheme, method=algorithms, n=seq(5,20,5))
 ```
 
-Five book recommendations to the first user in the utility matrix
+```{r fig.height=4, fig.width=8}
+#Results based on ROC - Using Top N Recommendations
+plot(resultsROC, annotate = T, legend = "topleft")
+title(main = "ROC Curve")
+```
+
+
+```{r fig.height=5, fig.width=8}
+#Precision/Recall plot
+plot(resultsROC, "prec/rec", annotate = T, legend = "bottomright")
+title(main = "Precision vs. Recall")
+```
+
+
+#### Predict Top 5 Books With Best UCBF and ICBF Models
+
 ```{r}
 #Choose the best model and use those to make recommendation
+
+#Best Overall IBCF Model w/ k = 25; similarity = pearson
+ICBF_25_P = Recommender(ratingMatrix[-1,],"IBCF",
+                    param = list(method="pearson",k = 25))
+
+#Best Overall UBCF Model w/ nn=10; similarity = pearson
+UBCF_10_P = Recommender(ratingMatrix[-1,],"UBCF",
+                    param = list(method="pearson",nn = 10))
+
+#Make Predictions
+pred_ICBF_25_P = predict(ICBF_25_P,ratingMatrix[1,],n=5)
+pred_ICBF_25_P_vals = predict(ICBF_25_P,ratingMatrix[1,],type="ratings")
+
+pred_UBCF_10_P = predict(UBCF_10_P,ratingMatrix[1,],n=5)
+pred_UBCF_10_P_vals = predict(UBCF_10_P,ratingMatrix[1,],type="ratings")
 ```
 
-Association rules analysis
+#### Compare Book Recommendation Overlap
 
 ```{r}
-#Load the data
-books.df = read.csv("Books.csv")
-ratings.df = read.csv("Ratings.csv")
-
-
-#remove duplicates from books dataset
-books.df = books.df %>% distinct(title, .keep_all = TRUE)
-
-#Find and Remove Dupilcates from reviews dataset
-ratings.df = ratings.df %>% distinct(book_id, user_id, .keep_all = TRUE)
-
-#Only keep users with 100 or more ratings
-
-
-#Dropping all columns except Book ID and Title
-books.df <- books.df %>% select(book_id, title)
-
-#formatting the ratings dataset
-ratings.df <- ratings.df %>% spread(key = book_id, value = rating)
-
-#Remove first column (user IDs) and convert to matrix
-ratings.mat = as.matrix(ratings.df[, -1])
+#Retrieve the Top 5 Recommendations and Their Rated Values for ICBF Model
+as(pred_ICBF_25_P_vals,'list')$`0` %>% 
+  as.data.frame() %>% 
+  rename("Ratings" = ".") %>% 
+  arrange(desc(Ratings)) %>% head(5)
 ```
 
+
 ```{r}
+#Retrieve the Top 5 Recommendations and Their Rated Values for UCBF Model
+as(pred_UBCF_10_P_vals,'list')$`0` %>% 
+  as.data.frame() %>% 
+  rename("Ratings" = ".") %>% 
+  arrange(desc(Ratings)) %>% head(5)
+```
+
+---  
+
+## Association Rules Analysis
+
+```{r}
+#Now the interpretation is "Has this User Read this Book?"
+association_mat <- ratingmat 
+
+#Set all NA Values to 0
+association_mat[is.na(association_mat)] <- 0
+
+#Set all non-zero values to 1
+association_mat[association_mat != 0] <- 1
+
 #Convert the binary incidence matrix into a transactions database
-ratings.trans = as(ratings.mat, "transactions")
+book_trans = as(association_mat, "transactions")
 ```
 
-```{r}
-#Inspect all existing itemsets
-inspect(ratings.trans)
-```
 
 ```{r}
 #Plots the item frequencies (only colors with > % support or top 5)
-itemFrequencyPlot(ratings.trans,support=.08)
-itemFrequencyPlot(ratings.trans,topN=5)
+itemFrequencyPlot(book_trans,support=.08)
+itemFrequencyPlot(book_trans,topN=5)
 ```
 
 ```{r}
