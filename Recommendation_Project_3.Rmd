@@ -9,9 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-Exploratory Analysis 
-
-```{r}
+```{r message=FALSE, warning=FALSE}
 library(tidyverse)
 library(dplyr)
 library(visdat)
@@ -21,73 +19,154 @@ library(recommenderlab)
 
 ```{r}
 #reading in the data
-books = read.csv("Books.csv")
-ratings = read.csv("Ratings.csv")
+books_df = read.csv("Books.csv")
+ratings_df = read.csv("Ratings.csv")
 ```
 
 ```{r}
-#getting a glimpse of the data
-books %>% glimpse()
-ratings %>% glimpse()
-```
-
-
-Data Preprocessing
-
-```{r}
-#Not sure if this is needed but dropping URLS 
-books = subset(books, select = -c(image_url, small_image_url) )
+#Observe Books Data
+books_df %>% glimpse()
 ```
 
 ```{r}
-#Find and Remove Dupilcates from books dataset 
-books = books %>% distinct(title, .keep_all = TRUE)
+#Observe Ratings Data
+ratings_df %>% glimpse()
+```
+#### Data Preprocessing
 
-#Find and Remove Dupilcates from reviews dataset
-ratings = ratings %>% distinct(book_id, user_id, .keep_all = TRUE)
+#### Missing Values  
+
+```{r}
+#No missing values found within either dataset
+
+print("Books Dataframe Missingness Percentages")
+#Each variable's percentage of missing values
+colSums(is.na(books_df)) / nrow(books_df) * 100
+
+print("Ratings Dataframe Missingness Percentages")
+#Each variable's percentage of missing values
+colSums(is.na(ratings_df)) / nrow(ratings_df) * 100
+```
+
+#### Duplicate Observations
+
+```{r}
+#Observations and Their Duplicates
+duplicated = which(duplicated(books_df$title))
+
+#Show both the original observation and any duplicates
+dup_obs = books_df[which(books_df$title %in% books_df$title[duplicated]),]
+dup_obs %>% select(book_id, title, authors) %>% arrange(title)
 ```
 
 ```{r}
-#Only keep ratings from users with 100 or more reviews
+#Some observations have either 2, 3, or even 4 multiple duplicates  
+rows_to_remove <- dup_obs %>% 
+  group_by(title) %>% 
+  summarise(count = n(), 
+            .groups = 'drop') %>% 
+  filter(count > 1) %>% 
+  summarise(total_rows_to_remove = sum(count - 1))
 
+print(paste("Total Number of Rows to be Removed: ", rows_to_remove))
+```
+
+```{r}
+#Remove Duplicates from books_df where duplicate book titles
+books_df = books_df %>% distinct(title, .keep_all = TRUE)
+
+#Remove Duplicates from ratings_df where a user rated the same book twice
+ratings_df = ratings_df %>% distinct(book_id, user_id, .keep_all = TRUE)
+
+#Only retain ratings for which there is a reference to in Books Dataset
+ratings_df = ratings_df[which(ratings_df$book_id %in% books_df$book_id),]
+
+#Retrieve user_id values for users with at least 100 ratings
+retained_users = ratings_df %>% 
+    group_by(user_id) %>%
+    summarise(count_ratings = n()) %>%
+    filter(count_ratings >= 100) %>% 
+    distinct(user_id)
+
+#Retain Ratings for users with at least 100 ratings
+ratings_df = ratings_df[ratings_df$user_id %in% retained_users$user_id,]
+
+#Final Dimensionality of Books Dataframe
+print(paste("Final Number of Observations (Books): ", dim(books_df)[1]))
+
+#Final Number of Observations of Ratings Dataframe
+print(paste("Final Number of Observations (Ratings): ",dim(ratings_df)[1]))
 ```
 
 
 ```{r}
-#Create utility matrix
-utilitymat = spread(select(ratings, user_id, book_id, rating), book_id, rating)
-utilitymat = as.matrix(utilitymat[,-1])
+#Dimensionality of Sparse Matrix
+count_unique_users <- ratings_df$user_id %>% n_distinct()
+count_unique_books <- ratings_df$book_id %>% n_distinct()
+print(paste("Unique Users Considered:", count_unique_users))
+print(paste("Unique Books Considered:", count_unique_books))
+
+#Sparsity of Matrix
+perc = 100 * dim(ratings_df)[1] / (count_unique_users * count_unique_books)
+print(paste("Matrix Percentage with Ratings: ", round(perc, 2) ))
 ```
 
 ```{r}
-user_labels = sort(unique(ratings$userId))
-book_labels = books[match(as.numeric(colnames(utilitymat)),books$book_id),]$title
-dimension_names = list(userId = user_labels, books = book_labels)
-dimnames(utilitymat) = dimension_names
+#Creating utility matrix (users as rows, movies as columns, ratings as entries)
+#rows/columns labels are sorted according to userId & movieId (but always double check)
+ratingmat = spread(select(ratings_df, user_id, book_id, rating), book_id, rating)
+ratingmat = as.matrix(ratingmat[,-1])
 
-utilitymat[1:4,1:4] 
+#Set Row and Column Labels to be respective User Ids and Book Titles
+user_labels = sort(unique(ratings_df$user_id))
+book_titles = books_df[match(as.numeric(colnames(ratingmat)),books_df$book_id),]$title
+dimension_names = list(userId = user_labels, movieId = book_titles)
+#Replace Book Ids with Book Titles
+dimnames(ratingmat) = dimension_names
+ratingmat[1:5,1:3]
 ```
 
-
 ```{r}
-
 #Converting rating/utility matrix to realRatingMatrix to use with recommenderlab functions
-ratingMatrix = as(utilitymat, "realRatingMatrix")
-
-
-#Inspection of rating matrix: 
+ratingMatrix = as(ratingmat, "realRatingMatrix")
+#Inspection of rating matrix: It appears as though that as we get further into the database, books that were added
+#last had fewer ratings as a whole. As book id >> then num ratings gets fewer
 #Visual inspection of a small portion of the rating matrix (first 50 users, first 100 books)
-image(ratingMatrix[1:50,1:100], main = "Raw Ratings")
-
-#Number of submitted reviews (for each of the first 10 users)
-rowCounts(ratingMatrix[1:10,])
-
-#Number of users who have submitted at least 25 reviews
-length(rowCounts(ratingMatrix)>=25)
-
-#Average rating submitted (for each of the first 10 users)
-rowMeans(ratingMatrix[1:10,]) #automatically ignores NA's
+image(ratingMatrix[1:nrow(ratingMatrix),1:ncol(ratingMatrix)], main = "Raw Ratings")
 ```
+
+```{r}
+#Number of submitted reviews - Left Skewed (Sudden Rise around 180-195)
+count_ratings = rowCounts(ratingMatrix[1:nrow(ratingMatrix),])
+med_num_ratings = median(count_ratings)
+hist(count_ratings, breaks = 15, main = "Number of Submitted Ratings by All Users")
+mtext((paste("Median Number of Submitted Ratings: ", med_num_ratings)),
+      side = 3, line = .8, cex = 0.8)
+abline(v = med_num_ratings, col = "red", lty = 2)
+```
+
+
+```{r}
+par(mfrow = c(1,2))
+#Average Rating of Each User
+avg_user_rating = rowMeans(ratingMatrix[,])
+median_rating = median(avg_user_rating)
+hist(avg_user_rating, main = "Average Rating by All Users", xlab = "Average Rating")
+mtext((paste("Median Rating by All Users: ", round(median_rating,2 ))),
+      side = 3, line = .7, cex = 0.7)
+abline(v = median_rating, col = "red", lty = 2)
+
+#Average Rating of Each Book
+avg_book_rating = colMeans(ratingMatrix[,1:ncol(ratingMatrix)], na.rm = T)
+median_rating = median(avg_book_rating)
+hist(avg_book_rating, main = "Average Rating of All Books", xlab = "Average Rating")
+mtext((paste("Median Rating of All Books: ", round(median_rating,2 ))),
+      side = 3, line = .7, cex = 0.7)
+abline(v = median_rating, col = "red", lty = 2)
+```
+
+
+#### EDA for User Ratings
 
 User-based collaborative filtering
 
@@ -111,6 +190,7 @@ as(predUB,'list')
 ```{r}
 #Optional: storing predicted ratings in a data frame
 predictedUB_ratings = as(predUB,'data.frame') 
+predictedUB_ratings %>% arrange(desc(rating))
 ```
 
 Item-based collaborative filtering
