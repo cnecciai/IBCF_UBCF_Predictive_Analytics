@@ -1,16 +1,23 @@
 ---
 title: "Project 3"
 author: "Kassandra Sellers and Clark Necciai"
-date: "2024-06-21"
+date: "2024-06-22"
 output: html_document
 ---
 
+1. Perform Data Prep (remove duplicate values)
+2. Perform EDA 
+3. Prepare Data for Modeling
+4. Show some analysis on matrix form of ratings
+5. Modeling 
+
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, fig.width = 6, fig.height = 3)
 ```
 
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
+library(reshape2)
 library(dplyr)
 library(visdat)
 library(arules)
@@ -32,12 +39,14 @@ books_df %>% glimpse()
 #Observe Ratings Data
 ratings_df %>% glimpse()
 ```
-#### Data Preprocessing
+
+### Data Preprocessing
 
 #### Missing Values  
 
 ```{r}
-#No missing values found within either dataset
+#Some missing values in original_publication_year, however, since we're 
+#not doing any modeling with it, it can safely be ignored. 
 
 print("Books Dataframe Missingness Percentages")
 #Each variable's percentage of missing values
@@ -98,6 +107,86 @@ print(paste("Final Number of Observations (Books): ", dim(books_df)[1]))
 print(paste("Final Number of Observations (Ratings): ",dim(ratings_df)[1]))
 ```
 
+### Exploratory Data Analysis 
+
+#### Summary Statistics 
+
+```{r}
+books_df %>% select(original_publication_year, average_rating, ratings_count, text_reviews_count,ratings_1, ratings_2, ratings_3, ratings_4, ratings_5) %>% summary()
+```
+
+```{r}
+#Oldest Books in Repository
+books_df[books_df$original_publication_year < -500 & !is.na(books_df$original_publication_year),] %>% 
+  arrange((original_publication_year)) %>% 
+  select(title, original_publication_year, authors)
+```
+
+#### Distribution of Ratings
+
+```{r message=FALSE, warning=FALSE}
+#As people hear about a book's popularity, they may be inclined to read and give feedback 
+
+#Subset ratings for Density Plot
+vars_to_plot <- c("ratings_1", "ratings_2", "ratings_3", "ratings_4", "ratings_5")
+df_subset <- books_df[, vars_to_plot]
+df_long <- melt(df_subset)
+
+# Create density plot using ggplot
+ggplot(df_long, aes(x = value, fill = variable)) +
+  geom_density( alpha = 0.5) +
+  theme_minimal() +
+  labs(title = "Distribution of Ratings", 
+       subtitle = "People Appear to Give Fewer Ratings for Poor Quality Books",
+       x = "Number of Ratings", 
+       y = "Density",
+       fill = "Rating Score")  +
+  scale_x_continuous(limits = c(-50, 12500))
+```
+
+
+#### Highest Rated Books (title) 
+
+```{r fig.height=2}
+books_df %>% 
+  arrange(desc(average_rating)) %>% 
+  select(book_id, title, average_rating, authors) %>% 
+  head(5) %>%
+  ggplot(aes(x = reorder(title, average_rating), y = average_rating)) +
+  geom_col(aes(fill = average_rating), color = "black") +
+  coord_flip() +
+  geom_text(aes(label = average_rating), hjust = 1.5, color = "white") +
+  labs(x = "Book Title",
+       y = "Average Rating",
+       title = "Top 5 Highest Rated Books") +
+  theme(legend.position = "none")
+```
+
+
+#### Highest Rated Authors (author) 
+
+```{r fig.height=2}
+books_df %>% group_by(authors) %>%
+  summarise(count_books_written = n(),
+            average_rating = mean(average_rating, na.rm = T)) %>%
+  filter(count_books_written > 5) %>%
+  arrange(desc(average_rating)) %>% 
+  head(5) %>%
+  ggplot(aes(x = reorder(authors, average_rating), y = average_rating)) +
+  geom_col(aes(fill = average_rating), color = "black") +
+  coord_flip() +
+  geom_text(aes(label = round(average_rating,2)), hjust = 1.5, color = "white") +
+  labs(x = "Authors",
+       y = "Average Rating",
+       title = "Top 5 Highest Rated Authors",
+       subtitle = "Must have Written More than Five (5) Published Books") +
+  theme(legend.position = "none")
+```
+
+
+### Recommendation System Modeling 
+
+#### Create Utility Matrix
 
 ```{r}
 #Dimensionality of Sparse Matrix
@@ -113,7 +202,6 @@ print(paste("Matrix Percentage with Ratings: ", round(perc, 2) ))
 
 ```{r}
 #Creating utility matrix (users as rows, movies as columns, ratings as entries)
-#rows/columns labels are sorted according to userId & movieId (but always double check)
 ratingmat = spread(select(ratings_df, user_id, book_id, rating), book_id, rating)
 ratingmat = as.matrix(ratingmat[,-1])
 
@@ -125,6 +213,8 @@ dimension_names = list(userId = user_labels, movieId = book_titles)
 dimnames(ratingmat) = dimension_names
 ratingmat[1:5,1:3]
 ```
+
+#### Utility Matrix Visualization and Exploration
 
 ```{r}
 #Converting rating/utility matrix to realRatingMatrix to use with recommenderlab functions
@@ -138,7 +228,7 @@ image(ratingMatrix[1:nrow(ratingMatrix),1:ncol(ratingMatrix)], main = "Raw Ratin
 ```{r}
 #Number of submitted reviews - Left Skewed (Sudden Rise around 180-195)
 count_ratings = rowCounts(ratingMatrix[1:nrow(ratingMatrix),])
-med_num_ratings = median(count_ratings)
+med_num_ratings = median(count_ratings, na.rm = T)
 hist(count_ratings, breaks = 15, main = "Number of Submitted Ratings by All Users")
 mtext((paste("Median Number of Submitted Ratings: ", med_num_ratings)),
       side = 3, line = .8, cex = 0.8)
@@ -146,8 +236,10 @@ abline(v = med_num_ratings, col = "red", lty = 2)
 ```
 
 
-```{r}
+```{r fig.width=8}
+#Group Visualizations
 par(mfrow = c(1,2))
+
 #Average Rating of Each User
 avg_user_rating = rowMeans(ratingMatrix[,])
 median_rating = median(avg_user_rating)
@@ -165,10 +257,9 @@ mtext((paste("Median Rating of All Books: ", round(median_rating,2 ))),
 abline(v = median_rating, col = "red", lty = 2)
 ```
 
+### Modeling
 
-#### EDA for User Ratings
-
-User-based collaborative filtering
+#### User-based collaborative filtering
 
 ```{r}
 recUB = Recommender(ratingMatrix[-1,],"UBCF",
@@ -193,7 +284,7 @@ predictedUB_ratings = as(predUB,'data.frame')
 predictedUB_ratings %>% arrange(desc(rating))
 ```
 
-Item-based collaborative filtering
+#### Item-based collaborative filtering
 
 ```{r}
 ########### Item-based collaborative filtering model (IBCF):
