@@ -40,8 +40,10 @@ ratings_df %>% glimpse()
 #### Missing Values  
 
 ```{r}
-#Some missing values in original_publication_year, however, since we're 
-#not doing any modeling with it, it can safely be ignored. 
+#Replace "" Characters Strings with NA 
+books_df[books_df$isbn == "",]$isbn <- NA
+books_df[books_df$original_title == "",]$original_title <- NA
+books_df[books_df$language_code == "",]$language_code <- NA
 
 print("Books Dataframe Missingness Percentages")
 #Each variable's percentage of missing values
@@ -52,6 +54,7 @@ print("Ratings Dataframe Missingness Percentages")
 colSums(is.na(ratings_df)) / nrow(ratings_df) * 100
 ```
 
+
 #### Duplicate Observations
 
 ```{r}
@@ -60,7 +63,7 @@ duplicated = which(duplicated(books_df$title))
 
 #Show both the original observation and any duplicates
 dup_obs = books_df[which(books_df$title %in% books_df$title[duplicated]),]
-dup_obs %>% select(book_id, title, authors) %>% arrange(title)
+dup_obs %>% select(book_id, title, authors) %>% arrange(title) %>% glimpse()
 ```
 
 ```{r}
@@ -78,13 +81,22 @@ print(paste("Total Number of Rows to be Removed: ", rows_to_remove))
 ```{r}
 #Remove Duplicates from books_df where duplicate book titles
 books_df = books_df %>% distinct(title, .keep_all = TRUE)
+print(paste("Number of Duplicate Entries of Books removed: ", 10000 - dim(books_df)[1]))
+```
 
+```{r}
 #Remove Duplicates from ratings_df where a user rated the same book twice
 ratings_df = ratings_df %>% distinct(book_id, user_id, .keep_all = TRUE)
+print(paste("Number of Duplicate Entries by Users removed: ", 981756 - dim(ratings_df)[1]))
+```
 
+```{r}
 #Only retain ratings for which there is a reference to in Books Dataset
 ratings_df = ratings_df[which(ratings_df$book_id %in% books_df$book_id),]
+print(paste("Count of Ratings removed due to not having a reference in Books:", 979478 - dim(ratings_df)[1]))
+```
 
+```{r}
 #Retrieve user_id values for users with at least 100 ratings
 retained_users = ratings_df %>% 
     group_by(user_id) %>%
@@ -102,21 +114,25 @@ print(paste("Final Number of Observations (Books): ", dim(books_df)[1]))
 print(paste("Final Number of Observations (Ratings): ",dim(ratings_df)[1]))
 ```
 
-### Exploratory Data Analysis 
-
 #### Summary Statistics 
 
 ```{r}
-books_df %>% select(original_publication_year, average_rating, ratings_count, text_reviews_count,ratings_1, ratings_2, ratings_3, ratings_4, ratings_5) %>% summary()
+books_df %>% summary()
 ```
+
+```{r}
+ratings_df %>% summary()
+```
+
+### Exploratory Data Analysis 
 
 #### Data Visualization
 
 ```{r}
 #Inspect `original_publication_year to see oldest Books
-books_df[books_df$original_publication_year < -500 & !is.na(books_df$original_publication_year),] %>% 
+books_df[books_df$original_publication_year < 0 & !is.na(books_df$original_publication_year),] %>% 
   arrange((original_publication_year)) %>% 
-  select(title, original_publication_year, authors)
+  select(title, original_publication_year, authors, average_rating)
 ```
 
 #### Distribution of Ratings
@@ -143,7 +159,6 @@ ggplot(df_long, aes(x = value, fill = variable)) +
        fill = "Rating Score")  +
   scale_x_continuous(limits = c(-50, 12500))
 ```
-
 
 #### Highest Rated Books (title) 
 
@@ -288,22 +303,26 @@ algorithms = list("random" = list(name = "RANDOM", param = NULL),
                   "IBCF_25" = list(name = "IBCF", param = list(k = 25)),
                   "IBCF_25_P" = list(name = "IBCF", param = list(k = 25, method="pearson")))
 
-#Evaluating models in terms of their top_N recommended movies:
+#Evaluating models in terms of their top_N recommended books:
 resultsROC = evaluate(x=scheme, method=algorithms, n=seq(5,20,5))
 ```
 
-```{r fig.height=4, fig.width=8}
+#### Performance Evaluation 
+
+```{r fig.height=4, fig.width=7}
 #Results based on ROC - Using Top N Recommendations
 plot(resultsROC, annotate = T, legend = "topleft")
 title(main = "ROC Curve")
 ```
 
-
-```{r fig.height=5, fig.width=8}
+```{r fig.height=4, fig.width=6}
 #Precision/Recall plot
 plot(resultsROC, "prec/rec", annotate = T, legend = "bottomright")
 title(main = "Precision vs. Recall")
 ```
+
+
+*Overall Best Model: Item-Based Collaborative Filtering with K=25 & Pearson Correlation*
 
 
 #### Predict Top 5 Books With Best UCBF and ICBF Models
@@ -337,7 +356,6 @@ as(pred_ICBF_25_P_vals,'list')$`0` %>%
   arrange(desc(Ratings)) %>% head(5)
 ```
 
-
 ```{r}
 #Retrieve the Top 5 Recommendations and Their Rated Values for UCBF Model
 as(pred_UBCF_10_P_vals,'list')$`0` %>% 
@@ -345,7 +363,6 @@ as(pred_UBCF_10_P_vals,'list')$`0` %>%
   rename("Ratings" = ".") %>% 
   arrange(desc(Ratings)) %>% head(5)
 ```
-
 
 ### Association Rules Analysis
 
