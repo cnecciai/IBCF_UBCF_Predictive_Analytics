@@ -283,11 +283,9 @@ abline(v = median_rating, col = "red", lty = 2)
 
 ```{r}
 #Defining good rating as 4 stars or more
-
-#Given that we specified users as having at least 100 ratings, we'll allow for 75
 set.seed(42)
 scheme = evaluationScheme(ratingMatrix,method = "split",
-                           train=0.9, given=75, goodRating=4)
+                           train=0.9, given=-10, goodRating=4)
 
 #Setting up a list of models to compare
 algorithms = list("random" = list(name = "RANDOM", param = NULL),
