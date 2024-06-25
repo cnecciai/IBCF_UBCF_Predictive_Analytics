@@ -300,6 +300,7 @@ algorithms = list("random" = list(name = "RANDOM", param = NULL),
                   "IBCF_25" = list(name = "IBCF", param = list(k = 25)),
                   "IBCF_25_P" = list(name = "IBCF", param = list(k = 25, method="pearson")))
 
+
 #Evaluating models in terms of their top_N recommended books:
 resultsROC = evaluate(x=scheme, method=algorithms, n=seq(5,20,5))
 ```
@@ -312,7 +313,7 @@ plot(resultsROC, annotate = T, legend = "topleft")
 title(main = "ROC Curve")
 ```
 
-```{r fig.height=4, fig.width=6}
+```{r fig.height=6, fig.width=8}
 #Precision/Recall plot
 plot(resultsROC, "prec/rec", annotate = T, legend = "bottomright")
 title(main = "Precision vs. Recall")
