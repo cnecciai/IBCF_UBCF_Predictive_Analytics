@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE, fig.width = 6, fig.height = 3)
 ```
 
 ```{r message=FALSE, warning=FALSE}
+#Load Libraries
 library(tidyverse)
 library(reshape2)
 library(dplyr)
@@ -17,13 +18,15 @@ library(visdat)
 library(arules)
 library(recommenderlab)
 library(RColorBrewer)
+```
 
+```{r message=FALSE, warning=FALSE}
 #reading in the data
 books_df = read.csv("Books.csv")
 ratings_df = read.csv("Ratings.csv")
 ```
 
-*Initial Inspection*
+*Initial Data Inspection*
 
 ```{r}
 #Observe Books Data
@@ -35,27 +38,30 @@ books_df %>% glimpse()
 ratings_df %>% glimpse()
 ```
 
-### Data Preprocessing
+## Data Preprocessing
 
-#### Missing Values  
+### Missing Values  
 
 ```{r}
 #Replace "" Characters Strings with NA 
 books_df[books_df$isbn == "",]$isbn <- NA
 books_df[books_df$original_title == "",]$original_title <- NA
 books_df[books_df$language_code == "",]$language_code <- NA
+```
 
+```{r}
 print("Books Dataframe Missingness Percentages")
 #Each variable's percentage of missing values
 colSums(is.na(books_df)) / nrow(books_df) * 100
+```
 
+```{r}
 print("Ratings Dataframe Missingness Percentages")
 #Each variable's percentage of missing values
 colSums(is.na(ratings_df)) / nrow(ratings_df) * 100
 ```
 
-
-#### Duplicate Observations
+### Duplicate Observations
 
 ```{r}
 #Observations and Their Duplicates
@@ -91,7 +97,7 @@ print(paste("Number of Duplicate Entries by Users removed: ", 981756 - dim(ratin
 ```
 
 ```{r}
-#Only retain ratings for which there is a reference to in Books Dataset
+#Only retain ratings for which there is a reference in Books Dataset
 ratings_df = ratings_df[which(ratings_df$book_id %in% books_df$book_id),]
 print(paste("Count of Ratings removed due to not having a reference in Books:", 979478 - dim(ratings_df)[1]))
 ```
@@ -124,12 +130,12 @@ books_df %>% summary()
 ratings_df %>% summary()
 ```
 
-### Exploratory Data Analysis 
+## Exploratory Data Analysis 
 
-#### Data Visualization
+### Data Visualization
 
 ```{r}
-#Inspect `original_publication_year to see oldest Books
+#Inspect `original_publication_year` to see oldest Books
 books_df[books_df$original_publication_year < 0 & !is.na(books_df$original_publication_year),] %>% 
   arrange((original_publication_year)) %>% 
   select(title, original_publication_year, authors, average_rating)
@@ -148,7 +154,7 @@ vars_to_plot <- c("ratings_1", "ratings_2", "ratings_3", "ratings_4", "ratings_5
 df_subset <- books_df[, vars_to_plot]
 df_long <- melt(df_subset)
 
-# Create density plot using ggplot
+#Density Plot of Variable Distributions
 ggplot(df_long, aes(x = value, fill = variable)) +
   geom_density( alpha = 0.5) +
   theme_minimal() +
@@ -181,7 +187,8 @@ books_df %>%
 #### Highest Rated Authors
 
 ```{r fig.height=2.5}
-#Inspect Which Authors on average has the highest rated books
+#Inspect which Authors on average have the highest rated books
+
 #We're going to be looking at authors who have written more than 
 #a few books, given that the vast majority of authors have only
 #written a single book
@@ -209,13 +216,13 @@ books_df %>% group_by(authors) %>%
 #### Create Utility Matrix
 
 ```{r}
-#Dimensionality of Sparse Matrix
+#Dimensionality of Matrix
 count_unique_users <- ratings_df$user_id %>% n_distinct()
 count_unique_books <- ratings_df$book_id %>% n_distinct()
 print(paste("Unique Users Considered:", count_unique_users))
 print(paste("Unique Books Considered:", count_unique_books))
 
-#Sparsity of Matrix
+#Sparsity Percentage of Matrix
 perc = 100 * dim(ratings_df)[1] / (count_unique_users * count_unique_books)
 print(paste("Matrix Percentage with Ratings: ", round(perc, 2) ))
 ```
@@ -231,6 +238,8 @@ book_titles = books_df[match(as.numeric(colnames(ratingmat)),books_df$book_id),]
 dimension_names = list(user_id = user_labels, book_id = book_titles)
 #Replace Book Ids with Book Titles
 dimnames(ratingmat) = dimension_names
+
+#Inspect for correct formatting
 ratingmat[1:5,1:3]
 ```
 
@@ -239,9 +248,9 @@ ratingmat[1:5,1:3]
 ```{r fig.height=5, fig.width=8}
 #Converting rating/utility matrix to realRatingMatrix to use with recommenderlab functions
 ratingMatrix = as(ratingmat, "realRatingMatrix")
+
 #Inspection of rating matrix: It appears as though that as we get further into the database, books that were added
 #last had fewer ratings as a whole. As book id >> then num ratings gets fewer
-#Visual inspection of a small portion of the rating matrix (first 50 users, first 100 books)
 image(ratingMatrix[1:nrow(ratingMatrix),1:ncol(ratingMatrix)], main = "Raw Ratings")
 ```
 
@@ -254,7 +263,6 @@ mtext((paste("Median Number of Submitted Ratings: ", med_num_ratings)),
       side = 3, line = .8, cex = 0.8)
 abline(v = med_num_ratings, col = "red", lty = 2)
 ```
-
 
 ```{r fig.width=8}
 #Group Visualizations
@@ -283,6 +291,7 @@ abline(v = median_rating, col = "red", lty = 2)
 
 ```{r}
 #Defining good rating as 4 stars or more
+#given: All but 10 observations used for training
 set.seed(42)
 scheme = evaluationScheme(ratingMatrix,method = "split",
                            train=0.9, given=-10, goodRating=4)
@@ -319,9 +328,7 @@ plot(resultsROC, "prec/rec", annotate = T, legend = "bottomright")
 title(main = "Precision vs. Recall")
 ```
 
-
 *Overall Best Model: Item-Based Collaborative Filtering with K=25 & Pearson Correlation*
-
 
 #### Predict Top 5 Books With Best UCBF and ICBF Models
 
@@ -335,7 +342,9 @@ ICBF_25_P = Recommender(ratingMatrix[-1,],"IBCF",
 #Best Overall UBCF Model w/ nn=10; similarity = pearson
 UBCF_10_P = Recommender(ratingMatrix[-1,],"UBCF",
                     param = list(method="pearson",nn = 10))
+```
 
+```{r}
 #Make Predictions
 pred_ICBF_25_P = predict(ICBF_25_P,ratingMatrix[1,],n=5)
 pred_ICBF_25_P_vals = predict(ICBF_25_P,ratingMatrix[1,],type="ratings")
